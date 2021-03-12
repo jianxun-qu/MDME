@@ -1,1 +1,0 @@
-function auxil_mdme_raw2tx(rawdata, ti, te, tr)
