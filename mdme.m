@@ -1,14 +1,14 @@
 
-% clear all
-% close all
+clear all
+close all
 
-csfm0 = 1;
-csft1 = 4000;
-csft2 = 2000;
+csf_m0 = 1;
+csf_t1 = 4000;
+csf_t2 = 2000;
 
-gmm0 = 0.9;
-gmt1 = 1450;
-gmt2 = 80;
+gm_m0 = 0.9;
+gm_t1 = 1450;
+gm_t2 = 80;
 
 TR = 4260;
 TD = [150, 580, 2000, 4130];
@@ -18,19 +18,15 @@ alpha = 90/180*pi; % excitation flip angle (90)
 theta = 120/180*pi; % saturation flip angle (120)
 b1scale = 1; % rf field scaling
 
-figure(1)
+% % Partial Volume
 
-TDi = 0:TR;
-csfsig = auxil_mdme_mtd(1, csft1, csft2, TDi, 0, TR, alpha, theta, b1scale);
-gmsig = auxil_mdme_mtd(1, gmt1, gmt2, TDi, 0, TR, alpha, theta, b1scale);
+pvr_arr = 0:0.02:1;
 
-plot(TDi, csfsig); xlim([0 TR]), ylim([-1 1]), grid on, hold on
-plot(TDi, csfsig * exp(-TE(1)/csft2)); xlim([0 TR]), ylim([-1 1]), grid on, hold on
-plot(TDi, csfsig * exp(-TE(2)/csft2)); xlim([0 TR]), ylim([-1 1]), grid on, hold on
-plot(TDi, gmsig); xlim([0 TR]), ylim([-1 1]), grid on
-plot(TDi, gmsig * exp(-TE(1)/gmt2)); xlim([0 TR]), ylim([-1 1]), grid on
-plot(TDi, gmsig * exp(-TE(2)/gmt2)); xlim([0 TR]), ylim([-1 1]), grid on
+mix_m0_arr = zeros(size(pvr_arr));
+mix_t1_arr = zeros(size(pvr_arr));
+mix_t2_arr = zeros(size(pvr_arr));
 
+% % [Sig1, ..., Sig8] <---> [qT1, qT2]
 
 cos_theta = cos(theta);
 cos_alpha = cos(alpha);
@@ -51,72 +47,62 @@ ftype = fittype(...
     'coefficients', {'m0', 'T1', 'T2'},...
     'problem', {'TR', 'cos_theta', 'cos_alpha'});
 
-% T2FLAIR
-flairti = 1965;
-flairtr = 6000;
-flairte = 250;
+TE_4fit = [TE', TE', TE', TE'];
+TD_4fit = [TD; TD];
 
-% % T1FLAIR
-% flairti = 876;
-% flairtr = 2000;
-% flairte = 240;
+gm_sig_full = auxil_mdme_sig(gm_m0, gm_t1, gm_t2, TD, TE, TR, alpha, theta, b1scale);
+csf_sig_full = auxil_mdme_sig(csf_m0, csf_t1, csf_t2, TD, TE, TR, alpha, theta, b1scale);
 
-csfflairarr = [];
-gmflairarr = [];
-mixflairarr = [];
-
-mixm0arr = [];
-mixt1arr = [];
-mixt2arr = [];
-
-pvrarr = 0:0.02:1;
-
-for pvr = pvrarr
+for pvr_idx = 1: length(pvr_arr)
     
-    csfsig0 = csfm0 * pvr;
-    csfsig = auxil_mdme_mtd(csfsig0, csft1, csft2, TD, 0, TR, alpha, theta, b1scale);
-    csfsig = exp(-TE./csft2)' * csfsig;
+    pvr = pvr_arr(pvr_idx);
     
-    gmsig0 = gmm0 * (1-pvr);
-    gmsig = auxil_mdme_mtd(gmsig0, gmt1, gmt2, TD, 0, TR, alpha, theta, b1scale);
-    gmsig = exp(-TE./gmt2)' * gmsig;
+    gm_sig = (1-pvr) * gm_sig_full;
+    csf_sig = pvr * csf_sig_full;
+    mix_sig = gm_sig + csf_sig;
     
-    csig = gmsig' + csfsig';
-    te = [TE; TE; TE; TE];
-    td = [TD'; TD'];
+    fobj = fit([TD_4fit(:), TE_4fit(:)],  mix_sig(:), ftype, fopts, 'problem', {TR, cos_theta, cos_alpha});
     
-    fobj = fit([td(:), te(:)],  csig(:), ftype, fopts, 'problem', {TR, cos_theta, cos_alpha});
+    mix_m0 = fobj.m0;
+    mix_t1 = fobj.T1;
+    mix_t2 = fobj.T2;
     
-    mixm0 = fobj.m0;
-    mixt1 = fobj.T1;
-    mixt2 = fobj.T2;
-    
-    csfflair = csfsig0 * (1-2*exp(-flairti/csft1)+exp(-flairtr/csft1))*exp(-flairte/csft2);
-    gmflair = gmsig0 * (1-2*exp(-flairti/gmt1)+exp(-flairtr/gmt1))*exp(-flairte/gmt2);
-
-    mixflair = mixm0 * (1-2*exp(-flairti/mixt1)+exp(-flairtr/mixt1))*exp(-flairte/mixt2);
-    
-    csfflairarr = [csfflairarr, csfflair];
-    gmflairarr = [gmflairarr, gmflair];
-    mixflairarr = [mixflairarr, mixflair];
-    
-    mixm0arr = [mixm0arr, mixm0];
-    mixt1arr = [mixt1arr, mixt1];
-    mixt2arr = [mixt2arr, mixt2];
+    mix_m0_arr(pvr_idx) = mix_m0;
+    mix_t1_arr(pvr_idx) = mix_t1;
+    mix_t2_arr(pvr_idx) = mix_t2;
     
 end
 
-% figure(2)
-% plot(csfflairarr); hold on
-% plot(gmflairarr); hold on
+% % Syn FLAIR
 
-truesumarr = csfflairarr+gmflairarr;
+flair_ti = 1966;
+flair_tr = 6000;
+flair_te = 200;
 
-% plot(pvrarr, truesumarr/truesumarr(1)); hold on
-plot(pvrarr, mixflairarr/mixflairarr(1)); hold on
-legend
+csf_flair_arr = [];
+gm_flair_arr = [];
+mix_flair_arr = [];
 
-% figure(3),
-% plot(pvrarr, mixm0arr/1); hold on
-% plot(pvrarr, mixt1arr/csft1);
-% plot(pvrarr, mixt2arr/csft2);
+
+csf_flair = auxil_mdme_syflair(flair_ti, flair_te, flair_tr, csf_m0*pvr_arr, csf_t1, csf_t2);
+gm_flair = auxil_mdme_syflair(flair_ti, flair_te, flair_tr, gm_m0*(1-pvr_arr), gm_t1, gm_t2);
+mix_flair = auxil_mdme_syflair(flair_ti, flair_te, flair_tr, mix_m0_arr, mix_t1_arr, mix_t2_arr); 
+
+csf_flair = csf_flair / gm_flair(1);
+gm_flair = gm_flair / gm_flair(1);
+mix_flair = mix_flair / mix_flair(1);
+
+plot(pvr_arr, csf_flair + gm_flair, 'LineWidth', 6); hold on
+plot(pvr_arr, mix_flair, 'LineWidth', 6);
+xlim([0 1])
+ylim([0 2])
+grid on
+set(gcf, 'Color', 'w');
+set(gca, 'FontName','Calibri', 'FontSize', 30, 'FontWeight', 'BOLD')
+title('FLAIR signal change')
+xlabel('CSF Partial Volume Ratio')
+ylabel('FLAIR Signal Intensity')
+legend('Actual', 'SynFLAIR')
+
+
+
